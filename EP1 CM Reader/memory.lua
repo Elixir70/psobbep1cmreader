@@ -89,35 +89,35 @@ local _MonsterIDToUnitxtID = {
     [101]  = { 21, 22, 23 }, -- Pan Arms/Migium/Hidoom
 
     -- Mines
-    [128] = { 24, 50 },      -- Dubchic/Gilchic
-    [129] = { 25 },          -- Garanz
-    [130] = { 26, 27 },      -- Sinow Beat/Sinow Gold
-    [131] = { 28 },          -- Canadine
-    [132] = { 29 },          -- Canane
-    [133] = { 49 },          -- Dubwitch
+    [128]  = { 24, 50 },     -- Dubchic/Gilchic
+    [129]  = { 25 },         -- Garanz
+    [130]  = { 26, 27 },     -- Sinow Beat/Sinow Gold
+    [131]  = { 28 },         -- Canadine
+    [132]  = { 29 },         -- Canane
+    [133]  = { 49 },         -- Dubwitch
 
     -- Ruins
-    [160] = { 30 },          -- Delsaber
-    [161] = { 31, 32, 33 },  -- Chaos Sorcerer//Bee R/Bee L
-    [162] = { 34 },          -- Dark Gunner
-    [163] = { 35 },          -- Death Gunner
-    [164] = { 36 },          -- Dark Bringer
-    [165] = { 37 },          -- Indi Belra
-    [166] = { 41, 42, 43 },  -- Dimenian/La Dimenian/So Dimenian
-    [167] = { 40 },          -- Bulclaw
-    [168] = { 38 },          -- Claw
+    [160]  = { 30 },         -- Delsaber
+    [161]  = { 31, 32, 33 }, -- Chaos Sorcerer//Bee R/Bee L
+    [162]  = { 34 },         -- Dark Gunner
+    [163]  = { 35 },         -- Death Gunner
+    [164]  = { 36 },         -- Dark Bringer
+    [165]  = { 37 },         -- Indi Belra
+    [166]  = { 41, 42, 43 }, -- Dimenian/La Dimenian/So Dimenian
+    [167]  = { 40 },         -- Bulclaw
+    [168]  = { 38 },         -- Claw
 
     -- Unknown container
-    [48] = { 0 },
+    [48]   = { 0 },
 }
 
 -- monster.ID => param number if it has a sub type
 local _SkinToSubtypeParamIdx = {
-    [68]  = 6,  -- Booma/Gobooma/Gigobooma
-    [99]  = 6,  -- Evil Shark/Pal Shark/Guil Shark
-    [128] = 6,  -- Dubchic/Gilchic
-    [130] = 2,  -- Sinow Beat/Sinow Gold
-    [166] = 6,  -- Dimenian/La Dimenian/So Dimenian
+    [68]    =  6,  -- Booma/Gobooma/Gigobooma
+    [99]    =  6,  -- Evil Shark/Pal Shark/Guil Shark
+    [128]   =  6,  -- Dubchic/Gilchic
+    [130]   =  2,  -- Sinow Beat/Sinow Gold
+    [166]   =  6,  -- Dimenian/La Dimenian/So Dimenian
 }
 
 -- Read the monster.ID field and determine what is the proper parameter
@@ -168,19 +168,20 @@ end
 
 -- Read a monster from the monster list into the table.
 local function ReadMonsterInfo(monster, index)
-	local monsterListAddr = pso.read_u32(_MonsterList)
+    local monsterListAddr = pso.read_u32(_MonsterList)
     local monsterAddr     = monsterListAddr + 72 * index
     
+    -- TODO: Should allocate and return the monster here instead.
     if monster.params == nil then
         monster.params = {}
     end
 
-	monster.ID            = pso.read_u16(monsterAddr + _MonsterIDOffset) -- aka its skin
+    monster.ID            = pso.read_u16(monsterAddr + _MonsterIDOffset) -- aka its skin
     monster.floor         = pso.read_u16(monsterAddr + _MonsterFloorOffset) -- u16? Not even used...
     monster.section       = pso.read_u8 (monsterAddr + _MonsterSectionOffset)
-	monster.wave          = pso.read_u8 (monsterAddr + _MonsterWaveOffset)
-	monster.x             = pso.read_f32(monsterAddr + _MonsterXOffset)
-	monster.y             = pso.read_f32(monsterAddr + _MonsterYOffset)
+    monster.wave          = pso.read_u8 (monsterAddr + _MonsterWaveOffset)
+    monster.x             = pso.read_f32(monsterAddr + _MonsterXOffset)
+    monster.y             = pso.read_f32(monsterAddr + _MonsterYOffset)
     monster.z             = pso.read_f32(monsterAddr + _MonsterZOffset)
     monster.params[1]     = pso.read_f32(monsterAddr + _MonsterParam1)
     monster.params[2]     = pso.read_f32(monsterAddr + _MonsterParam2)
