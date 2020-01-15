@@ -12,7 +12,6 @@ local addonHome                   = "addons/" .. addonName .. "/"
 local optionsFileName             = addonHome .. "options.lua"
 
 local lib_helpers                 = require("solylib.helpers")
-
 local core_mainmenu               = require("core_mainmenu")
 local cfg                         = require(addonName .. ".configuration")
 local debug                       = require(addonName .. ".debug")
@@ -27,6 +26,7 @@ local ConfigurationWindow
 -- Defaults
 local _EP1CMReaderOptionsDefaults = {
     {"enable", true},                          -- Is this enabled?
+    {"spaceSpawns", true},                     -- Put a space between the numbers?
     {"configurationWindowEnable", true},       -- Is the config window enabled?
     {"anchor", 3},                             -- Anchor to the screen--see configuration.lua
     {"X", 0},                                  -- X coord of window (relative to anchor)
@@ -53,101 +53,11 @@ local _EP1CMReaderOptionsDefaults = {
     {"countsDebug", false},                    -- Enable debug info to help me!
 }
 
--- Inserts tabs/spaces for saving the options.lua
-local function InsertTabs(level)
-    for i=0,level do
-        io.write("    ")
+-- Wrapper around imgui.Text for a table
+local function DisplayTextStrings(t)
+    for _,s in ipairs(t) do
+        imgui.Text(s)
     end
-end
-
--- Recursively save a table to a file. Has some awful hacks.
-local function SaveTableToFile(tbl, level)
-    if level == 0 then
-        io.write("return\n")
-    end
-    
-    InsertTabs(level-1)
-    io.write("{\n")
-    for key,val in pairs(tbl) do
-        local skey
-        local ktype = type(key)			
-        local sval
-        local vtype = type(val)
-        
-        -- Hack to avoid writing out the internal changed var
-        if tostring(key) ~= "changed" then
-        
-            if     vtype == "string"  then 
-                sval = string.format("%q", val)
-                
-                InsertTabs(level)
-                io.write(string.format("%s = %s,\n", key, sval))
-                
-            elseif vtype == "number"  then 
-                -- Hack for hex...
-                if tostring(key) == "flagMask" or tostring(key) == "flagNum" then
-                    sval = string.format("0x%-0.8X", val)
-                else
-                    sval = string.format("%s", val)
-                end
-                
-                InsertTabs(level)
-                io.write(string.format("%s = %s,\n", key, sval))
-                
-            elseif vtype == "boolean" then 
-                sval = tostring(val) 
-                
-                InsertTabs(level)
-                io.write(string.format("%s = %s,\n", key, sval))
-                
-            elseif vtype == "table"   then 
-                -- Very hackish... Don't write the index for nested  tables
-                -- Why? Because I'm assuming there aren't any nested tables with
-                -- any real indexes..
-                if level == 0 then
-                    InsertTabs(level)
-                    io.write(string.format("%s = \n", key))
-                end
-                
-                -- And recurse to write the table in this place
-                SaveTableToFile(val, level+1)
-            end
-        end
-    end
-    
-    InsertTabs(level-1)
-    if level ~= 0 then
-        io.write("},\n")
-    else
-        io.write("}\n")
-    end
-end
-
--- Save options to the file. Does some cleanup for hacks and removing empty flags.
-local function SaveOptions(tbl, fileName)
-    local xTemp = 0
-    if xTemp == 1 then 
-        return
-    end
-
-    local file = io.open(fileName, "w")
-    if file ~= nil then
-        io.output(file)
-        SaveTableToFile(tbl, 0)
-        io.close(file)
-    end
-end
-
--- Retrieve local window options 
-local function GetWindowOptions()
-    local opts = { options.noMove, options.noResize, options.noTitleBar, options.AlwaysAutoResize }
-    return opts
-end
-
--- Retrieve monster counts window options
-local function GetMonstersWindowOptions()
-    local opts = { options.countsNoMove, options.countsNoResize, options.countsNoTitleBar, options.countsAlwaysAutoResize }
-    return opts
 end
 
 -- Hack: find the index of the first map event.
@@ -156,7 +66,7 @@ end
 -- We know they don't and won't, but it's easier to do this.
 -- This is useful for stages like 1c5 and 1c6 where for some reason,
 -- the floors begin at "floor number" 6 and 7, but the rest of the
--- stages do not. So generally, this will return 1.
+-- stages do not. This usually returns 1.
 -- It's probably a better idea to adjust those tables for those stages 
 -- to have their areas be 1-based...
 local function HackIBase(mapEventsForAFloor)
@@ -175,12 +85,14 @@ end
 -- insert newMonster into the table in its appropriate place. This function should handle allocating
 -- the sub-tables for the result table.
 local function InsertMonsterIntoResult(result, newMonster, floor)
+    -- Get the tables for this floor
     local resultFloor = result[floor]
     if resultFloor == nil then
         result[floor] = {}
         resultFloor = result[floor]
     end
     
+    -- Get the tables for the monster's section
     local sectionNumber = newMonster.section
     local resultSection = resultFloor[sectionNumber]
     if resultSection == nil then
@@ -188,6 +100,7 @@ local function InsertMonsterIntoResult(result, newMonster, floor)
         resultSection = resultFloor[sectionNumber]
     end
 
+    -- Get the tables for all the monsters in the wave.
     local waveNumber = newMonster.wave
     local resultWaves = resultSection[waveNumber]
     if resultWaves == nil then
@@ -202,18 +115,23 @@ local function InsertMonsterIntoResult(result, newMonster, floor)
     return result
 end
 
--- Globals for preventing work every frame.
-local _CachedImguiStrings  = {}
-local _CachedMapEvents     = {}
-local _CachedMonsters      = {}
-local _CachedEP            = -1
-local _CachedQuestPtr      = -1
-local _CachedCMFlag        = -1
-local _CacheValid          = false
+-- Globals for preventing work every frame for the main window.
+local _CachedImguiStringsMain  = {}
+local _CachedMapEvents         = {}
+local _CachedMonsters          = {}
+local _CachedEP                = -1
+local _CachedQuestPtr          = -1
+local _CachedCMFlag            = -1
+local _CacheValid              = false
+
+-- State for the combo boxes in the monsters window.
+local areaIndex              = 1
+local sectionIndex           = 0
+local waveIndex              = 1
 
 -- Check if the cache is invalid. 
 -- Returns true when cache is valid, false when it's invalid.
-local function ResultCacheStillValid()
+local function MemoryCacheStillValid()
     if (_CachedEP       == memory.ReadEP() and
         _CachedQuestPtr == memory.ReadQuestPtr() and
         _CachedCMFlag   == memory.ReadCMFlag() and
@@ -230,19 +148,19 @@ local function ResultCacheStillValid()
 end
 
 -- Save this info to prevent constantly doing work every frame.
-local function SaveResultCache(monsters, mapEvents, filteredList, imguiDisplay)
+local function SaveMemoryCache(monsters, mapEvents, filteredList, imguiDisplay)
     if _CacheValid then
         return
     end
 
-    _CacheValid         = true
-    _CachedMonsters     = monsters
-    _CachedMapEvents    = mapEvents
-    _CachedFilterList   = filteredList
-    _CachedImguiStrings = imguiDisplay
-    _CachedEP           = memory.ReadEP()
-    _CachedQuestPtr     = memory.ReadQuestPtr()
-    _CachedCMFlag       = memory.ReadCMFlag()
+    _CacheValid             = true
+    _CachedMonsters         = monsters
+    _CachedMapEvents        = mapEvents
+    _CachedFilterList       = filteredList
+    _CachedImguiStringsMain = imguiDisplay
+    _CachedEP               = memory.ReadEP()
+    _CachedQuestPtr         = memory.ReadQuestPtr()
+    _CachedCMFlag           = memory.ReadCMFlag()
     debug.DebugPrint(string.format("Saved result cache for quest %s.", memory.ReadQuestName()))
 end
 
@@ -259,7 +177,7 @@ end
 --
 -- The result is cached as long as the state hasn't changed.
 local function ReadMonsterList()
-    if ResultCacheStillValid() then
+    if MemoryCacheStillValid() then
         return _CachedMonsters
     end
 
@@ -273,7 +191,7 @@ local function ReadMonsterList()
     -- Get the count of monsters per floor and figure out total monsters in quest.
     -- Need this to know which floors the monsters belong because EP1 CM doesn't
     -- generate those floor numbers. It's also likely those fields are useless anyway.
-    monsterCounts     = memory.ReadMonsterCounts()
+    monsterCounts = memory.ReadMonsterCounts()
     for i=0,memory.MaxFloors do
         totalMonsters = totalMonsters + monsterCounts[i]
     end
@@ -298,8 +216,6 @@ local function ReadMonsterList()
             floor = floor + 1
         end
 
-        -- TODO: Handle bosses?
-
         -- Insert it into the result correctly
         InsertMonsterIntoResult(result, newMonster, floor)
 
@@ -312,7 +228,7 @@ end
 
 -- Return a list of map events. This is essentially a wrapper around ReadAllMapEvents().
 local function ReadMapEvents()
-    if ResultCacheStillValid() then
+    if MemoryCacheStillValid() then
         return _CachedMapEvents
     end
 
@@ -320,28 +236,69 @@ local function ReadMapEvents()
     return result
 end
 
--- Debugging function.
-local function DumpMonsterList(m)
-    for i,v in pairs(m) do
-        for ii,vv in pairs(v) do
-            for iii,vvv in pairs(vv) do
-                print(i, v, ii, vv, iii, vvv)
-            end
-        end
-    end
-end
-
--- Given the table of events (possibly for this area), find the one matching
+-- Given the table of events, find the one matching
 -- the specified id.
 local function GetEventByID(events, id)
     local result
-    for iEvent,tmp in pairs(events) do
+    for _,tmp in pairs(events) do
         if tmp.ID == id then
             result = tmp
             break
         end
     end
     return result
+end
+
+-- Loop until we inspect the event that unlocks this door.
+-- That event could be this one, or it could be an event
+-- generated by the client's pseudorandom spawn generator 
+-- which the event denoted by 'eventID' ultimately calls through
+-- a chain.
+local function FollowEventCalls(events, id, predicate, iterator, debugFloor)
+    local stack    = {}
+    local i        = 0
+    local maxLoops = 100
+    while (predicate() and i < maxLoops) do
+        local thisEvent
+
+        -- This should be true every iteration except the initial.
+        if id <= 0 then
+            id = table.remove(stack)
+            -- TODO: Could this ever return nil? Don't think so..
+        end
+
+        if id <= 0 then
+            error(string.format(
+                "Unexpected error following call graph. Incorrect map event %i for floor %i specified?", eventID, debugFloor))
+        end 
+
+        thisEvent = GetEventByID(events, id)
+        if thisEvent == nil then
+            -- Definitely something wrong
+            error(string.format("Unexpected error trying to find map event for id %i for floor %i", id, debugFloor))
+        end
+
+        -- Clear this now. If this event does a call, the next event will be inserted onto the
+        -- stack and it'll be checked from there.
+        id = 0
+
+        iterator(thisEvent)
+        for _,cv in pairs(thisEvent.clear_events) do
+            if memory.IsWaveClearCallType(cv.type) then
+                -- Add this to the stack and we'll check them later
+                table.insert(stack, cv.event)
+            end
+        end
+
+        -- Next iteration
+        i = i + 1
+    end
+
+    -- Something went horribly wrong.
+    if i >= maxLoops then
+        error(string.format(
+            "Infinite loop encountered in CountWavesForEventID following event ID %i", eventID))
+    end
 end
 
 -- Count the waves that must be cleared in order to clear eventID.
@@ -353,81 +310,40 @@ local function CountWavesForEventID(events, eventID, floor)
     local doorUnlocked = false
     local numWaves = 0
 
-    -- Count number of waves until door unlocked.
-    -- Assumptions here...
-    local id       = eventID
-    local stack    = {}
-    local i        = 0
-    local maxLoops = 100
-
-    -- Loop until we inspect the event that unlocks this door.
-    -- That event could be this one, or it could be an event
-    -- generated by the client's pseudorandom spawn generator 
-    -- which the event denoted by 'eventID' ultimately calls through
-    -- a chain.
-    while (doorUnlocked == false and i < maxLoops) do
-        local thisEvent
-
-        -- This should be true every iteration except the initial.
-        if id <= 0 then
-            id = table.remove(stack)
-        end
-
-        if id <= 0 then
-            error(string.format(
-                "Unexpected error following call graph. Incorrect map event %i for floor %i specified?", eventID, floor))
-        end 
-        
-        thisEvent = GetEventByID(events, id)
-        if thisEvent == nil then
-            -- Definitely something wrong
-            error(string.format("Unexpected error trying to find map event for id %i for floor %i", id, floor))
-        end
-
-        -- Clear this now. If this event does a call, the next event will be inserted onto the
-        -- stack and it'll be checked from there.
-        id = 0
-
-        -- At least one more wave for this map event.
+    -- Callbacks for FollowEventCalls traversal
+    local fPredicate = function() 
+        return (doorUnlocked == false) 
+    end
+    local fIterator  = function(thisEvent) 
         numWaves = numWaves + 1
         for _,cv in pairs(thisEvent.clear_events) do
-            if      memory.IsWaveClearUnlockType(cv.type) then
+            if memory.IsWaveClearUnlockType(cv.type) then
                 -- Assumption: This is the goal for clearing the room.
                 doorUnlocked = true
                 break
-            elseif memory.IsWaveClearCallType(cv.type) then
-                -- Add this to the stack and we'll check them later
-                table.insert(stack, cv.event)
             end
         end
-        i = i + 1
     end
 
-    -- Something went horribly wrong.
-    if i >= maxLoops then
-        error(string.format(
-            "Infinite loop encountered in CountWavesForEventID following event ID %i", eventID))
-    end
+    FollowEventCalls(events, eventID, fPredicate, fIterator, floor)
 
     return numWaves
 end
 
+
 -- Display the areas in the imgui window. Per area, display a list of the 
 -- number of waves in each room on the specified path through the area.
 local function DisplayAreas(monsterList, mapEvents)
-    if ResultCacheStillValid() then
+    if (MemoryCacheStillValid() and
+        ConfigurationWindow.spaceSpawns == _CachedSpaceSpawns) then
         -- No need to re-read and re-parse.
-        for _,s in ipairs(_CachedImguiStrings) do
-            imgui.Text(s)
-        end
-        return _CachedImguiStrings
+        DisplayTextStrings(_CachedImguiStringsMain)
+        return _CachedImguiStringsMain
     end
 
     local imguiStrings = {}
     local route        = cmode_events.GetEventsForStage(memory.ReadQuestName())
     
-    --for k,v in pairs(route) do print(k,v, v.ID) end
-
     -- Loop through each area of the route.
     -- Figure out the waves and get the count of the spawns in each event.
     for areaNum, areaEvents in ipairs(route) do
@@ -441,8 +357,14 @@ local function DisplayAreas(monsterList, mapEvents)
         end
 
         for _,eventIDToClear in ipairs(areaEvents) do
-            local numWaves = CountWavesForEventID(areaWaves, eventIDToClear, areaNum)
-            formatString = string.format("%s%i", formatString, numWaves)
+            local numWaves  = CountWavesForEventID(areaWaves, eventIDToClear, areaNum)
+            local separator = ""
+
+            if options.spaceSpawns then
+                separator = " "
+            end
+
+            formatString = string.format("%s%i%s", formatString, numWaves, separator)
         end 
  
         -- Can finally display it now 
@@ -484,27 +406,30 @@ local function PresentWaveWindow()
     imguiStrings = DisplayAreas(filteredList, mapEvents)
 
     -- Does nothing if cache is still valid
-    SaveResultCache(monsterList, mapEvents, filteredList, imguiStrings)
+    SaveMemoryCache(monsterList, mapEvents, filteredList, imguiStrings)
 end
 
 -- Display the options
 local function PresentConfigurationWindow()
+    local configWindowChanged = false
+    
     if options.configurationWindowEnable then
         ConfigurationWindow.open = true
         options.configurationWindowEnable = false
     end
     
-    local configWindowChanged = false
     ConfigurationWindow.Update()
     if ConfigurationWindow.changed then
         configWindowChanged = true
         ConfigurationWindow.changed = false
-        SaveOptions(options, optionsFileName)
+        ConfigurationWindow.SaveOptions(options, optionsFileName)
     end
+
+    return configWindowChanged
 end
 
 -- Display the "main window", which is the window showing the waves.
-local function PresentMainWindow()
+local function PresentMainWindow(cfgWindowChanged)
     -- Global enable here to let the configuration window work
     if options.enable == false then
         return
@@ -518,9 +443,10 @@ local function PresentMainWindow()
        imgui.SetNextWindowSizeConstraints(0, 0, options.W, options.H)
     end
 
-    if imgui.Begin(addonName, nil, GetWindowOptions()) then
+    if imgui.Begin(addonName, nil, ConfigurationWindow.GetWindowOptions()) then
         PresentWaveWindow()
-        lib_helpers.WindowPositionAndSize(addonName, options.X, options.Y, options.W, options.H, options.anchor, options.AlwaysAutoResize, configWindowChanged)
+        lib_helpers.WindowPositionAndSize(addonName, options.X, options.Y, options.W, options.H, 
+                                          options.anchor, options.AlwaysAutoResize, cfgWindowChanged)
         imgui.End()
         if options.transparentWindow == true then
             imgui.PopStyleColor()
@@ -528,13 +454,31 @@ local function PresentMainWindow()
     end
 end
 
--- State for the combo boxes in this window...
-local areaIndex = 1
-local sectionIndex = 0
-local waveIndex = 1
+-- Monsters window below.
 
 -- Display the monsters in each wave.
 local function PresentMonstersPerWave()
+    -- Common helper function.
+    local PresentMonstersComboBox        = function(description, index, tbl, numItems)
+        local success 
+        imgui.PushItemWidth(0.25 * imgui.GetWindowWidth())
+        success, index = imgui.Combo(description, index, tbl, numItems)
+        imgui.PopItemWidth()
+        return success, index
+    end
+
+    local PresentMonstersAreaComboBox    = function(tableOfAreas, index)
+        return PresentMonstersComboBox("Area Number", index, tableOfAreas, table.getn(tableOfAreas))
+    end
+    
+    local PresentMonstersSectionComboBox = function(tableOfSections, index)
+        return PresentMonstersComboBox("Section Number", index, tableOfSections, table.getn(tableOfSections))
+    end
+    
+    local PresentMonstersWaveComboBox    = function(tableOfWaves, index)
+        return PresentMonstersComboBox("Wave Number", index, tableOfWaves, table.getn(tableOfWaves))
+    end
+
     -- Nothing to do...
     if NotInQuest() then
         return
@@ -544,7 +488,7 @@ local function PresentMonstersPerWave()
     local monsterList = ReadMonsterList()
     local mapEvents   = ReadMapEvents()
     local iBase       = HackIBase(mapEvents)
-
+    
     -- Get the specified route through the map events
 
     -- TODO: Cache these into a separate cache to prevent scouring through the tables every frame.
@@ -564,73 +508,54 @@ local function PresentMonstersPerWave()
     local success
 
     -- Area number (1 indexed)
-    imgui.PushItemWidth(0.25 * imgui.GetWindowWidth())
-    success, areaIndex = imgui.Combo("Area Number", areaIndex, tableOfAreas, table.getn(tableOfAreas))
-    imgui.PopItemWidth()
-
+    success, areaIndex = PresentMonstersAreaComboBox(tableOfAreas, areaIndex)
+    
     -- Use the areaIndex to prepare the tables specific to that area
-    local routeSections = route[areaIndex]
-    if routeSections ~= nil then
-        for k,v in ipairs(routeSections) do
-            local event = GetEventByID(mapEvents[iBase + areaIndex].waves, v)
+    local routeEvents = route[areaIndex]
+    if routeEvents ~= nil then
+        for _,routeEvent in ipairs(routeEvents) do
+            local event = GetEventByID(mapEvents[iBase + areaIndex].waves, routeEvent)
             table.insert(tableOfSections, event.section)
             table.insert(tableOfEvents, event)
         end
     end
+    local mapEventsForArea = mapEvents[iBase + areaIndex].waves
 
     -- Get the section number for that area.
-    imgui.PushItemWidth(0.25 * imgui.GetWindowWidth())
-    success, sectionIndex = imgui.Combo("Section Number", sectionIndex, tableOfSections, table.getn(tableOfSections))
-    imgui.PopItemWidth()
-    local sectionNumber      = tableOfSections[sectionIndex]
+    success, sectionIndex = PresentMonstersSectionComboBox(tableOfSections, sectionIndex)
+    local sectionNumber   = tableOfSections[sectionIndex]
 
     -- Waves aren't necessarily in wave_number order... This means the "first wave" is often not wave_number 1.
     -- So we display waves 1 and up, but internally match them nicely.
     local iWaveCounter    = 1 -- assume one
     local event           = tableOfEvents[sectionIndex]
     if event then
-        local id              = event.ID
-
-        -- Need to follow the chain of events to cover all the waves correctly.
-        local stack           = {}
         local doorUnlocked    = false
-        while doorUnlocked == false do
-            -- Pop from the stack if second iteration
-            if id <= 0 then
-                id = table.remove(stack)
-            end
 
-            event = GetEventByID(mapEvents[iBase + areaIndex].waves, id)
-            if event == nil then
-                -- Shouldn't happen. This is a bug if it does.
-                error(string.format(
-                    "Event is nil for ID %i on floor number %i", id, areaIndex))
-            end
+        -- Callbacks
+        local fPredicate      = function() 
+            return (doorUnlocked == false) 
+        end
 
-            -- Got an event, so clear this and force the code to get the next one from the 'stack'.
-            id = 0
-
+        local fIterator       = function(thisEvent) 
             -- Save this wave's sequence number and the wave's event table.
             table.insert(tableOfWaveNums, iWaveCounter)
-            table.insert(tableOfWaves, event)
-            -- Follow its chain of event calls...
-            for _,v in pairs(event.clear_events) do
-                if     memory.IsWaveClearUnlockType(v.type) then
+            table.insert(tableOfWaves, thisEvent)
+            for _,v in pairs(thisEvent.clear_events) do
+                if memory.IsWaveClearUnlockType(v.type) then
                     doorUnlocked = true
-                elseif memory.IsWaveClearCallType(v.type) then
-                    table.insert(stack, v.event)
                 end
             end
 
             -- Saw a wave so increment counter
-            iWaveCounter = iWaveCounter + 1
+            iWaveCounter = iWaveCounter + 1    
         end
+
+        FollowEventCalls(mapEventsForArea, event.ID, fPredicate, fIterator, tableOfAreas[areaIndex])
     end
     
     -- Get the displayed wave number. Here, waveIndex 1 means the first wave, which is *not* necessarily wave_number 1.
-    imgui.PushItemWidth(0.25 * imgui.GetWindowWidth())
-    success, waveIndex = imgui.Combo("Wave Number", waveIndex, tableOfWaveNums, table.getn(tableOfWaveNums))
-    imgui.PopItemWidth()
+    success, waveIndex = PresentMonstersWaveComboBox(tableOfWaveNums, waveIndex)
 
     -- Now display the monsters for this wave in this room in this area.
     -- Map the specified wave sequence to the real wave to get the actual wave number.
@@ -638,10 +563,12 @@ local function PresentMonstersPerWave()
     -- This is rather cautious. 
     local waveMonsters = {}
     if (waveIndex > 0 and tableOfWaveNums[waveIndex] ~= nil) then
-        local desiredWave        = tableOfWaves[waveIndex]
+        local desiredWave = tableOfWaves[waveIndex]
+
         if desiredWave ~= nil then
             local mapEventWaveNumber = desiredWave.wave
             local areaMonsters       = monsterList[areaIndex + iBase]
+
             if areaMonsters then
                 local sectionMonsters    = areaMonsters[sectionNumber]
                 waveMonsters             = sectionMonsters[mapEventWaveNumber]
@@ -654,6 +581,7 @@ local function PresentMonstersPerWave()
         -- Show each monster individually (probably not very useful)
         for _,monster in pairs(waveMonsters) do
             local s = ""
+
             -- What else would be useful here? Unfortunately the X, Y, Z positioning
             -- isn't very useful unless you know the room's orientation.
             if options.countsDebug then
@@ -664,6 +592,7 @@ local function PresentMonstersPerWave()
                 s = string.format("%s: (%i, %i, %i)",
                         monster.name, monster.x, monster.y, monster.z)
             end
+
             imgui.Text(s)
         end
     else
@@ -685,7 +614,7 @@ local function PresentMonstersPerWave()
 end
 
 -- Present the monsters window
-local function PresentMonstersWindow()
+local function PresentMonstersWindow(cfgWindowChanged)
     -- Global enable here to let the configuration window work
     if options.countsEnable == false then
         return
@@ -700,10 +629,10 @@ local function PresentMonstersWindow()
     end
 
     windowName = addonName .. " Monsters"
-    if imgui.Begin(windowName, nil, GetMonstersWindowOptions()) then
+    if imgui.Begin(windowName, nil, ConfigurationWindow.GetMonstersWindowOptions()) then
         PresentMonstersPerWave()
         lib_helpers.WindowPositionAndSize(windowName, options.countsX, options.countsY, options.countsW, options.countsH, 
-                                          options.countsAnchor, options.countsAlwaysAutoResize, configWindowChanged)
+                                          options.countsAnchor, options.countsAlwaysAutoResize, cfgWindowChanged)
         imgui.End()
         if options.countsTransparentWindow == true then
             imgui.PopStyleColor()
@@ -713,14 +642,16 @@ end
 
 -- Top level present() with options checks.
 local function present()
+    local cfgWindowChanged
+
     -- Show configuration window if it's enabled.
-    PresentConfigurationWindow()
+    cfgWindowChanged = PresentConfigurationWindow()
 
     -- Show the main window, which is the waves per area window.
-    PresentMainWindow()
+    PresentMainWindow(cfgWindowChanged)
 
     -- Show the monsters window which shows the monsters for specified wave.
-    PresentMonstersWindow()
+    PresentMonstersWindow(cfgWindowChanged)
 end
 
 -- After reading options, verify they're okay.
@@ -736,7 +667,7 @@ else
     end
     
     -- We just created the options, so we should save to have valid file
-    SaveOptions(options, optionsFileName) 
+    ConfigurationWindow.SaveOptions(options, optionsFileName) 
 end
 
 -- Initialization routine that creates the config window and adds the 
@@ -753,7 +684,7 @@ local function init()
     return 
     {
         name = 'EP1 CM Reader',
-        version = '0.1.0',
+        version = '0.2.0',
         author = 'Ender',
         present = present,
         toggleable = true,

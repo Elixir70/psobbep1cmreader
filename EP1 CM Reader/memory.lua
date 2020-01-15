@@ -305,7 +305,7 @@ end
 -- from 0 to 10.
 local function ReadMapEventsPtrArray()
     local result = {}
-    local ptr = ReadMapEventPtr()
+    local ptr = ReadMapEventsPtr()
 
     return _CopyArrayOfDWORDS(result, ptr)
 end

@@ -24,6 +24,10 @@ local function ConfigurationWindow(configuration, addonName)
             this.changed = true
         end
 
+        if imgui.Checkbox("Separate spawns", _configuration.spaceSpawns) then
+            _configuration.spaceSpawns = not _configuration.spaceSpawns
+            this.changed = true
+        end
         if imgui.Checkbox("No title bar", _configuration.noTitleBar == "NoTitleBar") then
             if _configuration.noTitleBar == "NoTitleBar" then
                 _configuration.noTitleBar = ""
@@ -211,6 +215,8 @@ local function ConfigurationWindow(configuration, addonName)
                 _configuration.changed = true
                 this.changed = true
             end
+
+            imgui.TreePop()
         end
     end
 
@@ -227,6 +233,103 @@ local function ConfigurationWindow(configuration, addonName)
         _showWindowSettings()
 
         imgui.End()
+    end
+
+    -- Inserts tabs/spaces for saving the options.lua
+    local InsertTabs = function(level)
+        for i=0,level do
+            io.write("    ")
+        end 
+    end
+
+    -- Recursively save a table to a file. Has some awful hacks.
+    local SaveTableToFile = function(tbl, level)
+        if level == 0 then
+            io.write("return\n")
+            end
+        
+        InsertTabs(level-1)
+        io.write("{\n")
+        for key,val in pairs(tbl) do
+            local skey
+            local ktype = type(key)			
+            local sval
+            local vtype = type(val)
+            
+            -- Hack to avoid writing out the internal changed var
+            if tostring(key) ~= "changed" then
+            
+                if     vtype == "string"  then 
+                    sval = string.format("%q", val)
+                    
+                    InsertTabs(level)
+                    io.write(string.format("%s = %s,\n", key, sval))
+                    
+                elseif vtype == "number"  then 
+                    -- Hack for hex...
+                    if tostring(key) == "flagMask" or tostring(key) == "flagNum" then
+                        sval = string.format("0x%-0.8X", val)
+                    else
+                        sval = string.format("%s", val)
+                    end
+                    
+                    InsertTabs(level)
+                    io.write(string.format("%s = %s,\n", key, sval))
+                    
+                elseif vtype == "boolean" then 
+                    sval = tostring(val) 
+                    
+                    InsertTabs(level)
+                    io.write(string.format("%s = %s,\n", key, sval))
+                    
+                elseif vtype == "table"   then 
+                    -- Very hackish... Don't write the index for nested  tables
+                    -- Why? Because I'm assuming there aren't any nested tables with
+                    -- any real indexes..
+                    if level == 0 then
+                        InsertTabs(level)
+                        io.write(string.format("%s = \n", key))
+                    end
+                    
+                    -- And recurse to write the table in this place
+                    SaveTableToFile(val, level+1)
+                end
+            end
+        end
+        
+        InsertTabs(level-1)
+        if level ~= 0 then
+            io.write("},\n")
+        else
+            io.write("}\n")
+        end
+    end
+
+    -- Save options to the file.
+    this.SaveOptions = function(tbl, fileName)
+        local xTemp = 0
+        if xTemp == 1 then 
+            return
+        end
+
+        local file = io.open(fileName, "w")
+        if file ~= nil then
+            io.output(file)
+            SaveTableToFile(tbl, 0)
+            io.close(file)
+        end
+    end
+
+    -- Retrieve main window options 
+    this.GetWindowOptions = function()
+        local opts = { _configuration.noMove, _configuration.noResize, _configuration.noTitleBar, _configuration.AlwaysAutoResize }
+        return opts
+    end
+
+    -- Retrieve monster counts window options
+    this.GetMonstersWindowOptions = function()
+        local opts = { _configuration.countsNoMove, _configuration.countsNoResize, _configuration.countsNoTitleBar, _configuration.countsAlwaysAutoResize }
+        return opts
     end
 
     return this
