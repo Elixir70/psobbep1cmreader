@@ -2,11 +2,6 @@
 --                  the number of waves per room on the route. The addon can also display the
 --                  individual monsters in each wave.
 
--- I kind of use "map event" and "wave" interchangeably here, as well "floor" and "area". 
--- The secondary window that displays the monsters in a specified room->wave is also called
--- "counts" in most of this too.
--- This will be cleaned up maybe by 2021 ;)
-
 local addonName                   = "EP1 CM Reader"
 local addonHome                   = "addons/" .. addonName .. "/"
 local optionsFileName             = addonHome .. "options.lua"
@@ -68,7 +63,7 @@ end
 -- the floors begin at "floor number" 6 and 7, but the rest of the
 -- stages do not. This usually returns 1.
 -- It's probably a better idea to adjust those tables for those stages 
--- to have their areas be 1-based...
+-- to have their areas be converted to floor numbers be 1-based...
 local function HackIBase(mapEventsForAFloor)
     local iBase = 0
     for itmp=1,memory.MaxFloors do
@@ -125,9 +120,9 @@ local _CachedCMFlag            = -1
 local _CacheValid              = false
 
 -- State for the combo boxes in the monsters window.
-local areaIndex              = 1
-local sectionIndex           = 0
-local waveIndex              = 1
+local floorIndex               = 0
+local sectionIndex             = 0
+local waveIndex                = 0
 
 -- Check if the cache is invalid. 
 -- Returns true when cache is valid, false when it's invalid.
@@ -165,14 +160,14 @@ local function SaveMemoryCache(monsters, mapEvents, filteredList, imguiDisplay)
 end
 
 -- Function to read the monster list and create a resulting table.
--- The resulting table should be a table of areas. Each area is a table
+-- The resulting table should be a table of floors. Each floor is a table
 -- of rooms aka sections. Each room/section is a table of waves. Each wave
 -- is a table of monsters.
 -- 
 -- Suppose this function returns 'result'. Then...
--- 1) result[1] shall be a table for area 1. Call this 'x'.
+-- 1) result[1] shall be a table for floor 1. Call this 'x'.
 -- 2) x[n] shall be a table of the waves in room number 'n'. Call this 'room'.
--- 3) room[i] shall be a table of the monsters in wave 'i' of room 'n' for area '1'.
+-- 3) room[i] shall be a table of the monsters in wave 'i' of room 'n' for floor '1'.
 -- The goal is that there should be details available at the monster level.
 --
 -- The result is cached as long as the state hasn't changed.
@@ -232,8 +227,7 @@ local function ReadMapEvents()
         return _CachedMapEvents
     end
 
-    local result = memory.ReadAllMapEvents()
-    return result
+    return memory.ReadAllMapEvents()
 end
 
 -- Given the table of events, find the one matching
@@ -260,7 +254,7 @@ local function FollowEventCalls(events, id, predicate, iterator, debugFloor)
     local maxLoops = 100
     while (predicate() and i < maxLoops) do
         local thisEvent
-
+        
         -- This should be true every iteration except the initial.
         if id <= 0 then
             id = table.remove(stack)
@@ -327,13 +321,13 @@ local function CountWavesForEventID(events, eventID, floor)
 
     FollowEventCalls(events, eventID, fPredicate, fIterator, floor)
 
-    return numWaves
+    return numWaves 
 end
 
 
--- Display the areas in the imgui window. Per area, display a list of the 
--- number of waves in each room on the specified path through the area.
-local function DisplayAreas(monsterList, mapEvents)
+-- Display the floors in the imgui window. Per floor, display a list of the 
+-- number of waves in each room on the specified path through the floor.
+local function DisplayFloors(filteredList, mapEvents)
     if (MemoryCacheStillValid() and
         ConfigurationWindow.spaceSpawns == _CachedSpaceSpawns) then
         -- No need to re-read and re-parse.
@@ -343,21 +337,23 @@ local function DisplayAreas(monsterList, mapEvents)
 
     local imguiStrings = {}
     local route        = cmode_events.GetEventsForStage(memory.ReadQuestName())
-    
-    -- Loop through each area of the route.
+    local questExtraSpawns  = 0
+
+    -- Loop through each floor of the route.
     -- Figure out the waves and get the count of the spawns in each event.
-    for areaNum, areaEvents in ipairs(route) do
-        local formatString = string.format("Area %2i: ", areaNum)
-        local areaWaves 
+    for floorNum, floorEvents in ipairs(route) do
+        local formatString = string.format("Floor %2i: ", floorNum)
+        local floorWaves 
+        local floorExtraSpawns = 0
         local iBase = HackIBase(mapEvents)
 
-        areaWaves = mapEvents[iBase + areaNum].waves
-        if areaWaves == nil then
-            error("Unexpected error determining events for this area.")
+        floorWaves = mapEvents[iBase + floorNum].waves
+        if floorWaves == nil then
+            error("Unexpected error determining events for this floor.")
         end
 
-        for _,eventIDToClear in ipairs(areaEvents) do
-            local numWaves  = CountWavesForEventID(areaWaves, eventIDToClear, areaNum)
+        for _,eventIDToClear in ipairs(floorEvents) do
+            local numWaves  = CountWavesForEventID(floorWaves, eventIDToClear, floorNum)
             local separator = ""
 
             if options.spaceSpawns then
@@ -365,15 +361,25 @@ local function DisplayAreas(monsterList, mapEvents)
             end
 
             formatString = string.format("%s%i%s", formatString, numWaves, separator)
+            if numWaves >= 1 then
+                floorExtraSpawns  = floorExtraSpawns  + numWaves - 1
+            end
         end 
  
+        formatString = string.format("%s(+%i)", formatString, floorExtraSpawns)
+
         -- Can finally display it now 
         imgui.Text(formatString)
 
         -- Save the text string into a cache for avoiding this work next frame.
         table.insert(imguiStrings, formatString)
+
+        questExtraSpawns = questExtraSpawns + floorExtraSpawns
     end
 
+    local questExtraSpawnsString = string.format("+%i Spawns", questExtraSpawns)
+    imgui.Text(questExtraSpawnsString)
+    table.insert(imguiStrings, questExtraSpawnsString)
     return imguiStrings
 end
 
@@ -390,6 +396,66 @@ local function NotInQuest()
     return false
 end
 
+-- Create a new monster list for the stage that only contains those which spawn
+local function FilterMonsterList(monsterList, mapEvents)
+    if ((monsterList == nil or mapEvents == nil) and MemoryCacheStillValid()) then
+        return _CachedFilterList
+    end
+
+    local result = {}
+    local iBase = HackIBase(mapEvents)
+    local route = cmode_events.GetEventsForStage(memory.ReadQuestName())
+
+    for iFloor=1,table.getn(route) do
+        local floorMonsters         = monsterList[iBase + iFloor]
+        local filteredFloorMonsters = {}
+        local floorEvents           = mapEvents[iBase + iFloor].waves
+        local routeEventNums        = route[iFloor]
+
+        result[iBase + iFloor] = filteredFloorMonsters -- consistent with monsterList ...
+
+        -- For each event on this floor, follow the event in its section
+        -- and add each event's corresponding monsters to the result list.
+        for _,eventNum in ipairs(routeEventNums) do
+            local event = GetEventByID(floorEvents, eventNum)
+            if event then
+                local sectionMonsters         = floorMonsters[event.section]
+                local filteredSectionMonsters = {} 
+                local doorUnlocked            = false
+                local numWaves                = 0
+
+                filteredFloorMonsters[event.section] = filteredSectionMonsters
+
+                -- Callbacks for FollowEventCalls traversal
+                local fPredicate = function() 
+                    return (doorUnlocked == false) 
+                end
+
+                local fIterator  = function(thisEvent) 
+                    -- Move the table of monsters for this wave in the section into the filtered
+                    -- list for the section.
+                    table.insert(filteredSectionMonsters, sectionMonsters[thisEvent.wave])
+
+                    for _,cv in pairs(thisEvent.clear_events) do
+                        if memory.IsWaveClearUnlockType(cv.type) then
+                            -- Assumption: This is the goal for clearing the room.
+                            doorUnlocked = true
+                            break
+                        end
+                    end
+                end
+                
+                -- Follow the event through to completing the room.
+                FollowEventCalls(floorEvents, eventNum, fPredicate, fIterator, iFloor)
+            end
+        end
+    end    
+
+    -- At this point, result is the same as monsterList except the waves are in order
+    -- according to the random spawn generation.
+    return result
+end
+
 -- Highest level of the present() code specific for this addon.
 local function PresentWaveWindow()
     if NotInQuest() then
@@ -402,8 +468,11 @@ local function PresentWaveWindow()
     -- Read the Monster list with caching
     local monsterList = ReadMonsterList()
 
-    -- Display the areas and their wave counts
-    imguiStrings = DisplayAreas(filteredList, mapEvents)
+    -- Filter out only monsters that actually spawn
+    local filteredList = FilterMonsterList(monsterList, mapEvents)
+
+    -- Display the floors and their wave counts
+    imguiStrings = DisplayFloors(filteredList, mapEvents)
 
     -- Does nothing if cache is still valid
     SaveMemoryCache(monsterList, mapEvents, filteredList, imguiStrings)
@@ -430,7 +499,6 @@ end
 
 -- Display the "main window", which is the window showing the waves.
 local function PresentMainWindow(cfgWindowChanged)
-    -- Global enable here to let the configuration window work
     if options.enable == false then
         return
     end
@@ -454,10 +522,131 @@ local function PresentMainWindow(cfgWindowChanged)
     end
 end
 
--- Monsters window below.
+-- Shallow copy
+local function CloneTable(t)
+    local result = {}
+    for k,v in pairs(t) do
+        result[k] = v
+    end
+    return result
+end
+
+-- Counts window below.
+
+local function DisplayMonsterCounts(monsterCount)
+    -- Sort 
+    local tkeys = {}
+    for k,_ in pairs(monsterCount) do
+        table.insert(tkeys, k)
+    end
+    table.sort(tkeys)
+
+    for _,uid in ipairs(tkeys) do
+        local count = monsterCount[uid]
+        local name  = memory.GetMonsterNameByUnitxtID(uid)
+        local s     = string.format("%s: %i", name, count)
+        imgui.Text(s)
+    end
+end
+
+-- Count monsters in the filtered table of waves.
+local function CountMonstersInWave(floorNum, sectionNum, waveNum, monsterCount)
+    local filteredMonsters        = FilterMonsterList()
+    local mapEvents               = ReadMapEvents()
+    local iBase                   = HackIBase(mapEvents)
+    local filteredFloorMonsters   = filteredMonsters[iBase + floorNum]
+    local filteredSectionMonsters = filteredFloorMonsters[sectionNum]
+    local filteredWaveMonsters    = filteredSectionMonsters[waveNum]
+
+    for _,monster in pairs(filteredWaveMonsters) do
+        local uid = memory.GetUnitxtID(monster)
+        monsterCount[uid] = (monsterCount[uid] or 0) + 1
+    end
+end
+
+-- Count monsters in the filtered table of sections.
+local function CountMonstersInSection(floorNum, sectionNum, monsterCount)
+    local filteredMonsters        = FilterMonsterList()
+    local mapEvents               = ReadMapEvents()
+    local iBase                   = HackIBase(mapEvents)
+    local filteredFloorMonsters   = filteredMonsters[iBase + floorNum]
+    local filteredSectionMonsters = filteredFloorMonsters[sectionNum]
+
+    for waveNum,waveMonsters in pairs(filteredSectionMonsters) do
+        CountMonstersInWave(floorNum, sectionNum, waveNum, monsterCount)
+    end
+end
+
+-- Count monsters in all sections of a floor number.
+local function CountMonstersInFloor(floorNum, monsterCount)
+    local filteredMonsters      = FilterMonsterList()
+    local mapEvents             = ReadMapEvents()
+    local iBase                 = HackIBase(mapEvents)
+    local filteredFloorMonsters = filteredMonsters[iBase + floorNum]
+
+    for sectionNum,sectionMonsters in pairs(filteredFloorMonsters) do
+        CountMonstersInSection(floorNum, sectionNum, monsterCount)
+    end
+end
+
+-- Display totals for one wave
+local function PresentCountsForWave(floorNum, sectionNum, waveNum)
+    local monsterCount = {}
+
+    CountMonstersInWave(floorNum, sectionNum, waveNum, monsterCount)
+    DisplayMonsterCounts(monsterCount)
+end
+
+-- Display totals of all enemies in one room.
+local function PresentCountsForSection(floorNum, sectionNum)
+    local monsterCount = {}
+
+    CountMonstersInSection(floorNum, sectionNum, monsterCount)
+    DisplayMonsterCounts(monsterCount)
+end
+
+-- Display totals of all enemies on the route in this floor.
+local function PresentCountsForFloor(floorNum)
+    local monsterCount = {}
+
+    CountMonstersInFloor(floorNum, monsterCount)
+    DisplayMonsterCounts(monsterCount)
+end
+
+-- Display totals of all enemies on the route.
+local function PresentCountsTotal()
+    local route                = cmode_events.GetEventsForStage(memory.ReadQuestName())
+    local monsterCount         = {}
+
+    for iFloor=1,table.getn(route) do
+        CountMonstersInFloor(iFloor, monsterCount)
+    end
+    DisplayMonsterCounts(monsterCount)
+end
+
+-- Display the individual monsters in a wave.
+local function PresentCountsIndividualForWave(waveMonsters)
+    -- Show each monster individually (probably not very useful)
+    for _,monster in pairs(waveMonsters) do
+        local s = ""
+
+        -- What else would be useful here? Unfortunately the X, Y, Z positioning
+        -- isn't very useful unless you know the room's orientation.
+        if options.countsDebug then
+            s = string.format("%s (%i,%i): (%i, %i, %i)", 
+                    monster.name, monster.ID, monster.params[6], 
+                    monster.x, monster.y, monster.z)
+        else
+            s = string.format("%s: (%i, %i, %i)",
+                    monster.name, monster.x, monster.y, monster.z)
+        end
+
+        imgui.Text(s)
+    end
+end
 
 -- Display the monsters in each wave.
-local function PresentMonstersPerWave()
+local function PresentCounts()
     -- Common helper function.
     local PresentMonstersComboBox        = function(description, index, tbl, numItems)
         local success 
@@ -467,15 +656,15 @@ local function PresentMonstersPerWave()
         return success, index
     end
 
-    local PresentMonstersAreaComboBox    = function(tableOfAreas, index)
-        return PresentMonstersComboBox("Area Number", index, tableOfAreas, table.getn(tableOfAreas))
+    local PresentCountsFloorComboBox    = function(tableOfFloors, index)
+        return PresentMonstersComboBox("Floor Number", index, tableOfFloors, table.getn(tableOfFloors))
     end
     
-    local PresentMonstersSectionComboBox = function(tableOfSections, index)
+    local PresentCountsSectionComboBox = function(tableOfSections, index)
         return PresentMonstersComboBox("Section Number", index, tableOfSections, table.getn(tableOfSections))
     end
     
-    local PresentMonstersWaveComboBox    = function(tableOfWaves, index)
+    local PresentCountsWaveComboBox    = function(tableOfWaves, index)
         return PresentMonstersComboBox("Wave Number", index, tableOfWaves, table.getn(tableOfWaves))
     end
 
@@ -485,136 +674,105 @@ local function PresentMonstersPerWave()
     end
 
     -- Get the cached monsterList and mapEvents list
-    local monsterList = ReadMonsterList()
-    local mapEvents   = ReadMapEvents()
-    local iBase       = HackIBase(mapEvents)
+    local filteredMonsters = FilterMonsterList()
+    local mapEvents        = ReadMapEvents()
+    local iBase            = HackIBase(mapEvents)
     
-    -- Get the specified route through the map events
-
     -- TODO: Cache these into a separate cache to prevent scouring through the tables every frame.
 
-    local route           = cmode_events.GetEventsForStage(memory.ReadQuestName())
-    local tableOfAreas    = {} -- display table for area numbers
-    local tableOfSections = {} -- display table for section numbers
-    local tableOfWaveNums = {} -- display table for wave numbers
-    local tableOfWaves    = {} -- internal pairing with wave numbers to wave tables
-    local tableOfEvents   = {} -- internal pairing with tableOfSections. Unlock event sequence starts with this event for the room.
-
-    -- Build the display area table. Keep it nice (areas 1 to 5, not areas 7 to 11 for example)
-    for i,_ in ipairs(route) do
-        tableOfAreas[i] = string.format("%i", i)
-    end
-    
+    local route                   = cmode_events.GetEventsForStage(memory.ReadQuestName())
+    local tableOfFloors           = {} -- table for floor numbers
+    local tableOfSections         = {} -- table for section numbers
+    local tableOfWaveNums         = {} -- table for wave numbers
     local success
 
-    -- Area number (1 indexed)
-    success, areaIndex = PresentMonstersAreaComboBox(tableOfAreas, areaIndex)
-    
-    -- Use the areaIndex to prepare the tables specific to that area
-    local routeEvents = route[areaIndex]
-    if routeEvents ~= nil then
-        for _,routeEvent in ipairs(routeEvents) do
-            local event = GetEventByID(mapEvents[iBase + areaIndex].waves, routeEvent)
-            table.insert(tableOfSections, event.section)
-            table.insert(tableOfEvents, event)
-        end
+    -- Build the display floor table. Keep it nice (floors 1 to 5, not floors 7 to 11 for example)
+    for i,_ in ipairs(route) do
+        table.insert(tableOfFloors, i)
     end
-    local mapEventsForArea = mapEvents[iBase + areaIndex].waves
 
-    -- Get the section number for that area.
-    success, sectionIndex = PresentMonstersSectionComboBox(tableOfSections, sectionIndex)
-    local sectionNumber   = tableOfSections[sectionIndex]
-
-    -- Waves aren't necessarily in wave_number order... This means the "first wave" is often not wave_number 1.
-    -- So we display waves 1 and up, but internally match them nicely.
-    local iWaveCounter    = 1 -- assume one
-    local event           = tableOfEvents[sectionIndex]
-    if event then
-        local doorUnlocked    = false
-
-        -- Callbacks
-        local fPredicate      = function() 
-            return (doorUnlocked == false) 
-        end
-
-        local fIterator       = function(thisEvent) 
-            -- Save this wave's sequence number and the wave's event table.
-            table.insert(tableOfWaveNums, iWaveCounter)
-            table.insert(tableOfWaves, thisEvent)
-            for _,v in pairs(thisEvent.clear_events) do
-                if memory.IsWaveClearUnlockType(v.type) then
-                    doorUnlocked = true
-                end
-            end
-
-            -- Saw a wave so increment counter
-            iWaveCounter = iWaveCounter + 1    
-        end
-
-        FollowEventCalls(mapEventsForArea, event.ID, fPredicate, fIterator, tableOfAreas[areaIndex])
+    -- Allow selecting all floors
+    if not options.countsIndividual then
+        table.insert(tableOfFloors, "All")
     end
-    
+
+    -- Floor number (1 indexed)
+    success, floorIndex = PresentCountsFloorComboBox(tableOfFloors, floorIndex)
+    if tableOfFloors[floorIndex] == nil then
+        return
+    end
+
+    if tableOfFloors[floorIndex] == "All" then
+        -- User wants to display all monsters in quest
+        PresentCountsTotal()
+        return
+    end
+
+    local floorNumber  = tableOfFloors[floorIndex]
+    local routeEvents = route[floorIndex]
+    if routeEvents == nil then
+        -- Sanity
+        return
+    end
+
+    -- Get the sections
+    for _,routeEvent in ipairs(routeEvents) do
+        local event = GetEventByID(mapEvents[iBase + floorIndex].waves, routeEvent)
+        table.insert(tableOfSections, event.section)
+    end
+
+    -- Allow selecting all sections in an floor
+    if not options.countsIndividual then
+        table.insert(tableOfSections, "All")
+    end
+
+    local mapEventsForFloor = mapEvents[iBase + floorIndex].waves
+    success, sectionIndex = PresentCountsSectionComboBox(tableOfSections, sectionIndex)
+    if tableOfSections[sectionIndex] == nil then
+        return
+    end
+
+    if tableOfSections[sectionIndex] == "All" then
+        -- User wants to display all monsters for a floor
+        PresentCountsForFloor(floorIndex)
+        return
+    end
+
+    local sectionNumber            = tableOfSections[sectionIndex]
+    local filteredFloorMonsters    = filteredMonsters[iBase + floorIndex]
+    local filteredSectionMonsters  = filteredFloorMonsters[sectionNumber]
+    for k,_ in pairs(filteredSectionMonsters) do
+        table.insert(tableOfWaveNums, k)
+    end
+
+    -- Allow selecting all waves in a room
+    if not options.countsIndividual then
+        table.insert(tableOfWaveNums, "All")
+    end
+
     -- Get the displayed wave number. Here, waveIndex 1 means the first wave, which is *not* necessarily wave_number 1.
-    success, waveIndex = PresentMonstersWaveComboBox(tableOfWaveNums, waveIndex)
-
-    -- Now display the monsters for this wave in this room in this area.
-    -- Map the specified wave sequence to the real wave to get the actual wave number.
-    -- Then, look up the monsters from the 'monsterList' using the area number and section number.
-    -- This is rather cautious. 
-    local waveMonsters = {}
-    if (waveIndex > 0 and tableOfWaveNums[waveIndex] ~= nil) then
-        local desiredWave = tableOfWaves[waveIndex]
-
-        if desiredWave ~= nil then
-            local mapEventWaveNumber = desiredWave.wave
-            local areaMonsters       = monsterList[areaIndex + iBase]
-
-            if areaMonsters then
-                local sectionMonsters    = areaMonsters[sectionNumber]
-                waveMonsters             = sectionMonsters[mapEventWaveNumber]
-            end
-        end
+    success, waveIndex = PresentCountsWaveComboBox(tableOfWaveNums, waveIndex)
+    if tableOfWaveNums[waveIndex] == nil then
+        return
     end
 
-    -- And finally display the monsters 
+    if tableOfWaveNums[waveIndex] == "All" then
+        -- User wants to see everything in a room
+        PresentCountsForSection(floorNumber, sectionNumber)
+        return
+    end
+
+    -- Otherwise, they want a specific wave.
+    local waveMonsters = filteredSectionMonsters[tableOfWaveNums[waveIndex]]
     if options.countsIndividual then
-        -- Show each monster individually (probably not very useful)
-        for _,monster in pairs(waveMonsters) do
-            local s = ""
-
-            -- What else would be useful here? Unfortunately the X, Y, Z positioning
-            -- isn't very useful unless you know the room's orientation.
-            if options.countsDebug then
-                s = string.format("%s (%i,%i): (%i, %i, %i)", 
-                        monster.name, monster.ID, monster.params[6], 
-                        monster.x, monster.y, monster.z)
-            else
-                s = string.format("%s: (%i, %i, %i)",
-                        monster.name, monster.x, monster.y, monster.z)
-            end
-
-            imgui.Text(s)
-        end
+        PresentCountsIndividualForWave(waveMonsters)
     else
-        -- Count the monsters. Map "name" -> "count" in this wave.
-        local uniqueCounts = {}
-        for _,monster in pairs(waveMonsters) do
-            if uniqueCounts[monster.name] == nil then
-                uniqueCounts[monster.name] = 0
-            end
-            uniqueCounts[monster.name] = uniqueCounts[monster.name] + 1
-        end
-
-        -- Display the counts of each unique monster type in this wave.
-        for name,count in pairs(uniqueCounts) do
-            local s = string.format("%s: %i", name, count)
-            imgui.Text(s)
-        end
+        PresentCountsForWave(floorNumber, sectionNumber, tableOfWaveNums[waveIndex])
     end
 end
 
--- Present the monsters window
-local function PresentMonstersWindow(cfgWindowChanged)
+-- Present the counts window.
+local function PresentCountsWindow(cfgWindowChanged)
     -- Global enable here to let the configuration window work
     if options.countsEnable == false then
         return
@@ -628,9 +786,9 @@ local function PresentMonstersWindow(cfgWindowChanged)
        imgui.SetNextWindowSizeConstraints(0, 0, options.W, options.H)
     end
 
-    windowName = addonName .. " Monsters"
+    windowName = addonName .. " Counts"
     if imgui.Begin(windowName, nil, ConfigurationWindow.GetMonstersWindowOptions()) then
-        PresentMonstersPerWave()
+        PresentCounts()
         lib_helpers.WindowPositionAndSize(windowName, options.countsX, options.countsY, options.countsW, options.countsH, 
                                           options.countsAnchor, options.countsAlwaysAutoResize, cfgWindowChanged)
         imgui.End()
@@ -647,11 +805,16 @@ local function present()
     -- Show configuration window if it's enabled.
     cfgWindowChanged = PresentConfigurationWindow()
 
-    -- Show the main window, which is the waves per area window.
+    -- Need to have the base wave window enabled in order to display anything
+    if not options.enable then
+        return
+    end
+
+    -- Show the main window, which is the waves per floor window.
     PresentMainWindow(cfgWindowChanged)
 
     -- Show the monsters window which shows the monsters for specified wave.
-    PresentMonstersWindow(cfgWindowChanged)
+    PresentCountsWindow(cfgWindowChanged)
 end
 
 -- After reading options, verify they're okay.

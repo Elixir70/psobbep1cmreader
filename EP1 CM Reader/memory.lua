@@ -144,6 +144,11 @@ local function GetUnitxtID(monster)
     return result
 end
 
+-- Get monster name by its uid.
+local function GetMonsterNameByUnitxtID(uid)
+    return lib_unitxt.GetMonsterName(uid, pso.read_u32(_Difficulty) == 3)
+end
+
 -- Get the name for the monster by converting its ID and subtype appropriately.
 local function GetMonsterName(monster)
     local unitxtID = GetUnitxtID(monster)
@@ -457,4 +462,5 @@ return
     MaxFloors                  = _MaxFloors,
     GetUnitxtID                = GetUnitxtID,
     GetMonsterSubtype          = GetMonsterSubtype,
+    GetMonsterNameByUnitxtID   = GetMonsterNameByUnitxtID,
 }
