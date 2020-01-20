@@ -348,8 +348,9 @@ local function DisplayFloorStringsWithColor(strings, mapEvents)
     local myFloorIndex = myFloor - iBase
     local route        = cmode_events.GetEventsForStage(memory.ReadQuestName())
 
+    -- Shouldn't happen but no harm being cautious.
     if (myFloorIndex <= 0 or myFloorIndex > table.getn(route)) then
-        DisplayTextStrings(strings) -- ???
+        DisplayTextStrings(strings)
         return
     end
 
@@ -374,30 +375,43 @@ local function DisplayFloorStringsWithColor(strings, mapEvents)
         end
     end
 
-    -- Build new string with color
+    -- Build new string for this floor with color for the current room.
+    -- First display the "Floor %i:" 
     imgui.Text(string.format("%s: ", split1[1]))
     if table.getn(floorRoute) > 0  then
         imgui.SameLine(0, 0)
     end
 
+    -- Now display each of the wave counts.
     for tmp=1,table.getn(floorRoute) do
         local s = string.format("%s ", split2[tmp])
         if tmp == myRoomIdx then
+            -- Player is in this room. Color it appropriately.
             imgui.SameLine(0, 0)
             imgui.TextColored(options.currentWavesColorR / 0xFF, 
                               options.currentWavesColorG / 0xFF, 
                               options.currentWavesColorB / 0xFF, 
                               0xFF / 0xFF,
                               s)
-            --lib_helpers.TextC(false, options.currentWavesColor, "%s ", split2[tmp])
        else
             imgui.SameLine(0, 0)
             imgui.Text(s)
         end
     end
+
+    -- Any extra fields (extra spawns for the floor)
+    for i=table.getn(floorRoute)+1,table.getn(split2) do
+        imgui.SameLine(0, 0)
+        imgui.Text(split2[i])
+    end
     
     -- Display proceeding floors.
     for i=myFloorIndex+1,table.getn(route) do
+        imgui.Text(strings[i])
+    end
+
+    -- Any additional strings (total extra spawns)
+    for i=table.getn(route)+1, table.getn(strings) do
         imgui.Text(strings[i])
     end
 end
@@ -409,7 +423,6 @@ local function DisplayFloors(filteredList, mapEvents)
         ConfigurationWindow.spaceSpawns == _CachedSpaceSpawns) then
         -- No need to re-read and re-parse.
         DisplayFloorStringsWithColor(_CachedImguiStringsMain, mapEvents)
-        --DisplayTextStrings(_CachedImguiStringsMain)
         return _CachedImguiStringsMain
     end
 
@@ -456,7 +469,6 @@ local function DisplayFloors(filteredList, mapEvents)
     local questExtraSpawnsString = string.format("+%i Spawns", questExtraSpawns)
     table.insert(imguiStrings, questExtraSpawnsString)
     DisplayFloorStringsWithColor(imguiStrings, mapEvents)
-    --DisplayTextStrings(imguiStrings)
     return imguiStrings
 end
 
