@@ -22,6 +22,9 @@ local ConfigurationWindow
 local _EP1CMReaderOptionsDefaults = {
     {"enable", true},                          -- Is this enabled?
     {"spaceSpawns", true},                     -- Put a space between the numbers?
+    {"currentWavesColorR", 0xFF},              -- Current waves color (red) in the main window.
+    {"currentWavesColorG", 0xFF},              -- Current waves color (green) in the main window.
+    {"currentWavesColorB", 0xFF},              -- Current waves color (blue) in the main window.
     {"configurationWindowEnable", true},       -- Is the config window enabled?
     {"anchor", 3},                             -- Anchor to the screen--see configuration.lua
     {"X", 0},                                  -- X coord of window (relative to anchor)
@@ -252,6 +255,7 @@ local function FollowEventCalls(events, id, predicate, iterator, debugFloor)
     local stack    = {}
     local i        = 0
     local maxLoops = 100
+
     while (predicate() and i < maxLoops) do
         local thisEvent
         
@@ -324,6 +328,79 @@ local function CountWavesForEventID(events, eventID, floor)
     return numWaves 
 end
 
+local function StringSplit(inputstr, sep)
+    if sep == nil then
+        sep = "%s"
+    end
+
+    local t = {}
+
+    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+        table.insert(t, str)
+    end
+    return t
+end
+
+-- From the DisplayFloors() strings, color my room correctly.
+local function DisplayFloorStringsWithColor(strings, mapEvents)
+    local myFloor      = memory.ReadMyPlayerFloor()
+    local iBase        = HackIBase(mapEvents)
+    local myFloorIndex = myFloor - iBase
+    local route        = cmode_events.GetEventsForStage(memory.ReadQuestName())
+
+    if (myFloorIndex <= 0 or myFloorIndex > table.getn(route)) then
+        DisplayTextStrings(strings) -- ???
+        return
+    end
+
+    -- Display preceeding floors.
+    for i=1,myFloorIndex-1 do
+        imgui.Text(strings[i])
+    end
+
+    -- We're on this floor. Copy the rooms and then color ours correctly.
+    local floorRoute = route[myFloorIndex]
+    local mySection  = memory.ReadMyPlayerRoom()
+    local split1     = StringSplit(strings[myFloorIndex], ":")
+    local split2     = StringSplit(split1[2], " ")
+
+    -- Figure out which spot in the string of waves
+    local myRoomIdx  = 0
+    for i,eventNum in pairs(floorRoute) do
+        local event = GetEventByID(mapEvents[myFloor].waves, eventNum)
+        if event.section == mySection then
+            myRoomIdx = i
+            break
+        end
+    end
+
+    -- Build new string with color
+    imgui.Text(string.format("%s: ", split1[1]))
+    if table.getn(floorRoute) > 0  then
+        imgui.SameLine(0, 0)
+    end
+
+    for tmp=1,table.getn(floorRoute) do
+        local s = string.format("%s ", split2[tmp])
+        if tmp == myRoomIdx then
+            imgui.SameLine(0, 0)
+            imgui.TextColored(options.currentWavesColorR / 0xFF, 
+                              options.currentWavesColorG / 0xFF, 
+                              options.currentWavesColorB / 0xFF, 
+                              0xFF / 0xFF,
+                              s)
+            --lib_helpers.TextC(false, options.currentWavesColor, "%s ", split2[tmp])
+       else
+            imgui.SameLine(0, 0)
+            imgui.Text(s)
+        end
+    end
+    
+    -- Display proceeding floors.
+    for i=myFloorIndex+1,table.getn(route) do
+        imgui.Text(strings[i])
+    end
+end
 
 -- Display the floors in the imgui window. Per floor, display a list of the 
 -- number of waves in each room on the specified path through the floor.
@@ -331,7 +408,8 @@ local function DisplayFloors(filteredList, mapEvents)
     if (MemoryCacheStillValid() and
         ConfigurationWindow.spaceSpawns == _CachedSpaceSpawns) then
         -- No need to re-read and re-parse.
-        DisplayTextStrings(_CachedImguiStringsMain)
+        DisplayFloorStringsWithColor(_CachedImguiStringsMain, mapEvents)
+        --DisplayTextStrings(_CachedImguiStringsMain)
         return _CachedImguiStringsMain
     end
 
@@ -368,8 +446,6 @@ local function DisplayFloors(filteredList, mapEvents)
  
         formatString = string.format("%s(+%i)", formatString, floorExtraSpawns)
 
-        -- Can finally display it now 
-        imgui.Text(formatString)
 
         -- Save the text string into a cache for avoiding this work next frame.
         table.insert(imguiStrings, formatString)
@@ -378,8 +454,9 @@ local function DisplayFloors(filteredList, mapEvents)
     end
 
     local questExtraSpawnsString = string.format("+%i Spawns", questExtraSpawns)
-    imgui.Text(questExtraSpawnsString)
     table.insert(imguiStrings, questExtraSpawnsString)
+    DisplayFloorStringsWithColor(imguiStrings, mapEvents)
+    --DisplayTextStrings(imguiStrings)
     return imguiStrings
 end
 
@@ -401,7 +478,7 @@ local function FilterMonsterList(monsterList, mapEvents)
     if ((monsterList == nil or mapEvents == nil) and MemoryCacheStillValid()) then
         return _CachedFilterList
     end
-
+    
     local result = {}
     local iBase = HackIBase(mapEvents)
     local route = cmode_events.GetEventsForStage(memory.ReadQuestName())
@@ -456,6 +533,14 @@ local function FilterMonsterList(monsterList, mapEvents)
     return result
 end
 
+local function GetFilterMonsterList(monsterList, mapEvents)
+    if MemoryCacheStillValid() then
+        return _CachedFilterList
+    end
+
+    return FilterMonsterList(monsterList, mapEvents)
+end
+
 -- Highest level of the present() code specific for this addon.
 local function PresentWaveWindow()
     if NotInQuest() then
@@ -469,7 +554,7 @@ local function PresentWaveWindow()
     local monsterList = ReadMonsterList()
 
     -- Filter out only monsters that actually spawn
-    local filteredList = FilterMonsterList(monsterList, mapEvents)
+    local filteredList = GetFilterMonsterList(monsterList, mapEvents)
 
     -- Display the floors and their wave counts
     imguiStrings = DisplayFloors(filteredList, mapEvents)
@@ -551,12 +636,12 @@ end
 
 -- Count monsters in the filtered table of waves.
 local function CountMonstersInWave(floorNum, sectionNum, waveNum, monsterCount)
-    local filteredMonsters        = FilterMonsterList()
+    local filteredMonsters        = GetFilterMonsterList()
     local mapEvents               = ReadMapEvents()
     local iBase                   = HackIBase(mapEvents)
-    local filteredFloorMonsters   = filteredMonsters[iBase + floorNum]
-    local filteredSectionMonsters = filteredFloorMonsters[sectionNum]
-    local filteredWaveMonsters    = filteredSectionMonsters[waveNum]
+    local filteredFloorMonsters   = filteredMonsters[iBase + floorNum] or {}
+    local filteredSectionMonsters = filteredFloorMonsters[sectionNum] or {}
+    local filteredWaveMonsters    = filteredSectionMonsters[waveNum] or {}
 
     for _,monster in pairs(filteredWaveMonsters) do
         local uid = memory.GetUnitxtID(monster)
@@ -566,11 +651,11 @@ end
 
 -- Count monsters in the filtered table of sections.
 local function CountMonstersInSection(floorNum, sectionNum, monsterCount)
-    local filteredMonsters        = FilterMonsterList()
+    local filteredMonsters        = GetFilterMonsterList()
     local mapEvents               = ReadMapEvents()
     local iBase                   = HackIBase(mapEvents)
-    local filteredFloorMonsters   = filteredMonsters[iBase + floorNum]
-    local filteredSectionMonsters = filteredFloorMonsters[sectionNum]
+    local filteredFloorMonsters   = filteredMonsters[iBase + floorNum] or {}
+    local filteredSectionMonsters = filteredFloorMonsters[sectionNum] or {}
 
     for waveNum,waveMonsters in pairs(filteredSectionMonsters) do
         CountMonstersInWave(floorNum, sectionNum, waveNum, monsterCount)
@@ -579,10 +664,10 @@ end
 
 -- Count monsters in all sections of a floor number.
 local function CountMonstersInFloor(floorNum, monsterCount)
-    local filteredMonsters      = FilterMonsterList()
+    local filteredMonsters      = GetFilterMonsterList()
     local mapEvents             = ReadMapEvents()
     local iBase                 = HackIBase(mapEvents)
-    local filteredFloorMonsters = filteredMonsters[iBase + floorNum]
+    local filteredFloorMonsters = filteredMonsters[iBase + floorNum] or {}
 
     for sectionNum,sectionMonsters in pairs(filteredFloorMonsters) do
         CountMonstersInSection(floorNum, sectionNum, monsterCount)
@@ -600,7 +685,7 @@ end
 -- Display totals of all enemies in one room.
 local function PresentCountsForSection(floorNum, sectionNum)
     local monsterCount = {}
-
+    print(floorNum, sectionNum)
     CountMonstersInSection(floorNum, sectionNum, monsterCount)
     DisplayMonsterCounts(monsterCount)
 end
@@ -674,7 +759,7 @@ local function PresentCounts()
     end
 
     -- Get the cached monsterList and mapEvents list
-    local filteredMonsters = FilterMonsterList()
+    local filteredMonsters = GetFilterMonsterList()
     local mapEvents        = ReadMapEvents()
     local iBase            = HackIBase(mapEvents)
     
@@ -694,6 +779,7 @@ local function PresentCounts()
     -- Allow selecting all floors
     if not options.countsIndividual then
         table.insert(tableOfFloors, "All")
+        table.insert(tableOfFloors, "Current")
     end
 
     -- Floor number (1 indexed)
@@ -707,6 +793,12 @@ local function PresentCounts()
         PresentCountsTotal()
         return
     end
+
+     if tableOfFloors[floorIndex] == "Current" then
+        -- User wants to display current monsters on floor
+        PresentCountsForFloor(memory.ReadMyPlayerFloor() - iBase)
+        return
+    end 
 
     local floorNumber  = tableOfFloors[floorIndex]
     local routeEvents = route[floorIndex]
@@ -724,6 +816,7 @@ local function PresentCounts()
     -- Allow selecting all sections in an floor
     if not options.countsIndividual then
         table.insert(tableOfSections, "All")
+        --table.insert(tableOfSections, "Current")
     end
 
     local mapEventsForFloor = mapEvents[iBase + floorIndex].waves
@@ -737,6 +830,11 @@ local function PresentCounts()
         PresentCountsForFloor(floorIndex)
         return
     end
+--[[     if tableOfSections[sectionIndex] == "Current" then
+        -- Convert to floor index...
+        PresentCountsForSection(floorNumber, memory.ReadMyPlayerRoom())
+        return
+    end ]]
 
     local sectionNumber            = tableOfSections[sectionIndex]
     local filteredFloorMonsters    = filteredMonsters[iBase + floorIndex]
@@ -805,7 +903,9 @@ local function present()
     -- Show configuration window if it's enabled.
     cfgWindowChanged = PresentConfigurationWindow()
 
-    -- Need to have the base wave window enabled in order to display anything
+    -- Need to have the base wave window enabled in order to display anything.
+    -- Sorry, but there's some dependencies on the caching that will be resolved 
+    -- eventually.
     if not options.enable then
         return
     end
@@ -847,7 +947,7 @@ local function init()
     return 
     {
         name = 'EP1 CM Reader',
-        version = '0.2.0',
+        version = '0.3.0',
         author = 'Ender',
         present = present,
         toggleable = true,

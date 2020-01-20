@@ -28,6 +28,21 @@ local function ConfigurationWindow(configuration, addonName)
             _configuration.spaceSpawns = not _configuration.spaceSpawns
             this.changed = true
         end
+
+        local colors
+        success, 
+        _configuration.currentWavesColorR, 
+        _configuration.currentWavesColorG, 
+        _configuration.currentWavesColorB = imgui.SliderInt3("Current room's color (R,G,B)", 
+                                                             _configuration.currentWavesColorR, 
+                                                             _configuration.currentWavesColorG, 
+                                                             _configuration.currentWavesColorB, 
+                                                             0, 255) 
+        if success then
+            _configuration.changed = true
+            this.changed = true
+        end
+
         if imgui.Checkbox("No title bar", _configuration.noTitleBar == "NoTitleBar") then
             if _configuration.noTitleBar == "NoTitleBar" then
                 _configuration.noTitleBar = ""

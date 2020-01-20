@@ -11,8 +11,8 @@ local _Episode             = 0xA9B1C8
 local _CModeFlag           = 0xA49508
 local _PlayerCount         = 0xAAE168
 local _Difficulty          = 0xA9CD68
-
-local _MyPos               = 0xA9C4F4
+local _FloorNumber         = 0xAAFCA0
+local _MyPlayerIndex       = 0xA9C4F4
 local _PlayerClassPointers = 0xA94254
 
 -- Player struct info
@@ -74,11 +74,11 @@ local _MaxFloors           = 14 -- ???
 -- EP1 Only...
 local _MonsterIDToUnitxtID = {
     -- Forest
-    [64]   = { 1, 2 },      -- Hildebear/Hildeblue
-    [66]   = { 3, 4 },      -- Mothmant/Monest
-    [65]   = { 5, 6 },      -- Rag Rappy/Al Rappy
-    [67]   = { 7, 8 },      -- Savage Wolf/Barbarous Wolf
-    [68]   = { 9, 10, 11 }, -- Booma/Gobooma/Gigobooma
+    [64]   = { 1, 2 },       -- Hildebear/Hildeblue
+    [66]   = { 3, 4 },       -- Mothmant/Monest
+    [65]   = { 5, 6 },       -- Rag Rappy/Al Rappy
+    [67]   = { 7, 8 },       -- Savage Wolf/Barbarous Wolf
+    [68]   = { 9, 10, 11 },  -- Booma/Gobooma/Gigobooma
 
     -- Caves
     [96]   = { 12 },         -- Grass Assassin
@@ -119,6 +119,38 @@ local _SkinToSubtypeParamIdx = {
     [130]   =  2,  -- Sinow Beat/Sinow Gold
     [166]   =  6,  -- Dimenian/La Dimenian/So Dimenian
 }
+
+local function ReadPlayerArray()
+    return _PlayerClassPointers
+end
+
+local function ReadPlayer(idx)
+    local p     = ReadPlayerArray()
+    return pso.read_u32(p + 4 * idx)
+end
+
+local function ReadMyPlayerIndex()
+    return pso.read_u32(_MyPlayerIndex)
+end
+
+local function ReadMyPlayer()
+    local myIdx = ReadMyPlayerIndex()
+    return ReadPlayer(myIdx)
+end
+
+local function ReadPlayerRoom(idx)
+    local p = ReadPlayer(idx)
+    return pso.read_u32(p + _Room)
+end
+
+local function ReadMyPlayerRoom()
+    local myIdx = ReadMyPlayerIndex()
+    return ReadPlayerRoom(myIdx)
+end
+
+local function ReadMyPlayerFloor()
+    return pso.read_u32(_FloorNumber)
+end
 
 -- Read the monster.ID field and determine what is the proper parameter
 -- in the monster data for the sub type field.
@@ -463,4 +495,11 @@ return
     GetUnitxtID                = GetUnitxtID,
     GetMonsterSubtype          = GetMonsterSubtype,
     GetMonsterNameByUnitxtID   = GetMonsterNameByUnitxtID,
+    ReadPlayerArray            = ReadPlayerArray,
+    ReadPlayer                 = ReadPlayer,
+    ReadMyPlayerIndex          = ReadMyPlayerIndex,
+    ReadMyPlayer               = ReadMyPlayer,
+    ReadPlayerRoom             = ReadPlayerRoom,
+    ReadMyPlayerRoom           = ReadMyPlayerRoom,
+    ReadMyPlayerFloor          = ReadMyPlayerFloor,
 }
