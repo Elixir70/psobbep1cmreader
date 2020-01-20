@@ -685,7 +685,6 @@ end
 -- Display totals of all enemies in one room.
 local function PresentCountsForSection(floorNum, sectionNum)
     local monsterCount = {}
-    print(floorNum, sectionNum)
     CountMonstersInSection(floorNum, sectionNum, monsterCount)
     DisplayMonsterCounts(monsterCount)
 end
