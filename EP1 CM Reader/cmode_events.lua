@@ -1,7 +1,7 @@
 -- The cmode map events that need to be cleared to advance. The route is defined by the map events
--- that need to be cleared. If there are optional enemies that can be skipped, those enemies from
--- the base map event should be skipped. 
--- Theses are the map events listed here. Generally the first two digits of the map event will
+-- that need to be cleared on the direct path to the exit. This includes both shortcut and non-shortcut.
+-- If there are optional enemies that can be skipped, those enemies from the base map event should be skipped. 
+-- These are the map events listed here. Generally the first two digits of the map event will
 -- point to the section number that you see in QEdit.
 -- Be careful with editing this file. 
 -- If you add a map event that is not in the quest file, the addon WILL break. 
@@ -28,7 +28,7 @@ local _C2Events = {
 local _C3Events = {
     [1] = { 141, 231, 302, 402, 601, 111, 211, 201, 151 },
     [2] = { 401, 601, 301 },
-    [3] = { 221, 111, 121, 101, 201, 601, 402, 301, 351 },
+    [3] = { 221, 111, 121, 101, 201, 601, 402, 301 },
     [4] = { 101, 111, 201 },
     [5] = { 131, 201, 211, 221, 601, 451, 141, 301, 401, 151 },
 }
