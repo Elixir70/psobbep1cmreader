@@ -5,7 +5,7 @@
 -- point to the section number that you see in QEdit.
 -- Be careful with editing this file. 
 -- If you add a map event that is not in the quest file, the addon WILL break. 
--- If you add a map event that is in the quest file but isn't actually used in the stage, the map event 
+-- If you add a map event that is in the quest file but isn't actually used in the area, the map event 
 -- will not be in the client memory and the addon WILL break.
 -- It is probably best to leave this alone unless you're making your own version and removing some extra rooms,
 -- such as the 1c8/1c9 non-shortcut routes.
@@ -20,7 +20,7 @@ local _C1Events = {
 local _C2Events = {
     [1] = { 502, 321, 101, 601, 511, 521 },
     [2] = { 101 },
-    [3] = { 301, 101, 511, 501, 601, 521, 341, 331 },
+    [3] = { 301, 121, 511, 501, 601, 521, 341, 331 },
     [4] = { 101, 501, 601 },
     [5] = { 101, 401, 341, 501, 601, 111, 311, 321, 521, 331 },
 }
@@ -91,6 +91,15 @@ local _MapStageNameToEventTables = {
     ["Stage7"] = _C7Events,
     ["Stage8"] = _C8Events,
     ["Stage9"] = _C9Events,
+    ["ステージ1"] = _C1Events,
+    ["ステージ2"] = _C2Events,
+    ["ステージ3"] = _C3Events,
+    ["ステージ4"] = _C4Events,
+    ["ステージ5"] = _C5Events,
+    ["ステージ6"] = _C6Events,
+    ["ステージ7"] = _C7Events,
+    ["ステージ8"] = _C8Events,
+    ["ステージ9"] = _C9Events,
 }
 
 -- Apparently 'Stage5' is really 'Stage5 '.
