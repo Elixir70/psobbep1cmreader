@@ -935,10 +935,12 @@ if optionsLoaded and type(options) == "table" then
         options[opt[1]] = lib_helpers.NotNilOrDefault(options[opt[1]], opt[2])
     end
 else
+    -- Either no options.lua or an error opening it. Setup the defaults.
     options = {}
     for _, opt in pairs(_EP1CMReaderOptionsDefaults) do
         options[opt[1]] = opt[2]
     end
+    -- Not saving the options here... Will be done when they change.
 end
 
 -- Initialization routine that creates the config window and adds the 
