@@ -5,7 +5,7 @@ local function ConfigurationWindow(configuration, addonName)
     {
         title = addonName .. " - Configuration",
         open = false,
-        changed = true,
+        changed = false,
     }
 
     local _configuration = configuration
@@ -251,19 +251,19 @@ local function ConfigurationWindow(configuration, addonName)
     end
 
     -- Inserts tabs/spaces for saving the options.lua
-    local InsertTabs = function(level)
+    this.InsertTabs = function(level)
         for i=0,level do
             io.write("    ")
         end 
     end
 
     -- Recursively save a table to a file. Has some awful hacks.
-    local SaveTableToFile = function(tbl, level)
+    this.SaveTableToFile = function(tbl, level)
         if level == 0 then
             io.write("return\n")
             end
         
-        InsertTabs(level-1)
+        this.InsertTabs(level-1)
         io.write("{\n")
         for key,val in pairs(tbl) do
             local skey
@@ -277,7 +277,7 @@ local function ConfigurationWindow(configuration, addonName)
                 if     vtype == "string"  then 
                     sval = string.format("%q", val)
                     
-                    InsertTabs(level)
+                    this.InsertTabs(level)
                     io.write(string.format("%s = %s,\n", key, sval))
                     
                 elseif vtype == "number"  then 
@@ -288,13 +288,13 @@ local function ConfigurationWindow(configuration, addonName)
                         sval = string.format("%s", val)
                     end
                     
-                    InsertTabs(level)
+                    this.InsertTabs(level)
                     io.write(string.format("%s = %s,\n", key, sval))
                     
                 elseif vtype == "boolean" then 
                     sval = tostring(val) 
                     
-                    InsertTabs(level)
+                    this.InsertTabs(level)
                     io.write(string.format("%s = %s,\n", key, sval))
                     
                 elseif vtype == "table"   then 
@@ -302,17 +302,17 @@ local function ConfigurationWindow(configuration, addonName)
                     -- Why? Because I'm assuming there aren't any nested tables with
                     -- any real indexes..
                     if level == 0 then
-                        InsertTabs(level)
+                        this.InsertTabs(level)
                         io.write(string.format("%s = \n", key))
                     end
                     
                     -- And recurse to write the table in this place
-                    SaveTableToFile(val, level+1)
+                    this.SaveTableToFile(val, level+1)
                 end
             end
         end
         
-        InsertTabs(level-1)
+        this.InsertTabs(level-1)
         if level ~= 0 then
             io.write("},\n")
         else
@@ -322,15 +322,10 @@ local function ConfigurationWindow(configuration, addonName)
 
     -- Save options to the file.
     this.SaveOptions = function(tbl, fileName)
-        local xTemp = 0
-        if xTemp == 1 then 
-            return
-        end
-
         local file = io.open(fileName, "w")
         if file ~= nil then
             io.output(file)
-            SaveTableToFile(tbl, 0)
+            this.SaveTableToFile(tbl, 0)
             io.close(file)
         end
     end

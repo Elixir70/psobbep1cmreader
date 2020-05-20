@@ -20,7 +20,7 @@ local ConfigurationWindow
 
 -- Defaults
 local _EP1CMReaderOptionsDefaults = {
-    {"enable", true},                          -- Is this enabled?
+    {"enable", false},                         -- Is this enabled?
     {"spaceSpawns", true},                     -- Put a space between the numbers?
     {"currentWavesColorR", 0xFF},              -- Current waves color (red) in the main window.
     {"currentWavesColorG", 0xFF},              -- Current waves color (green) in the main window.
@@ -929,7 +929,7 @@ local function present()
 end
 
 -- After reading options, verify they're okay.
-if optionsLoaded then
+if optionsLoaded and type(options) == "table" then
     -- Make sure everything is okay or else configuration will break.
     for _, opt in pairs(_EP1CMReaderOptionsDefaults) do
         options[opt[1]] = lib_helpers.NotNilOrDefault(options[opt[1]], opt[2])
@@ -939,9 +939,6 @@ else
     for _, opt in pairs(_EP1CMReaderOptionsDefaults) do
         options[opt[1]] = opt[2]
     end
-    
-    -- We just created the options, so we should save to have valid file
-    ConfigurationWindow.SaveOptions(options, optionsFileName) 
 end
 
 -- Initialization routine that creates the config window and adds the 
